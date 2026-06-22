@@ -162,6 +162,8 @@ def download_dem_bmi(aoi_gdf: gpd.GeoDataFrame, dem_type: str = "SRTMGL3", buffe
 
         st.info(f"Downloading {dem_type} from OpenTopography...")
 
+        api_key = st.session_state.get("opentopo_api_key", None) or None
+
         topo = Topography(
             dem_type=dem_type,
             south=miny,
@@ -169,7 +171,8 @@ def download_dem_bmi(aoi_gdf: gpd.GeoDataFrame, dem_type: str = "SRTMGL3", buffe
             west=minx,
             east=maxx,
             output_format="GTiff",
-            cache_dir="."
+            cache_dir=".",
+            api_key=api_key
         )
 
         dem_path = topo.fetch()
@@ -694,6 +697,24 @@ with st.sidebar:
                     st.rerun()
     else:
         st.info("Define an AOI first to download DEM")
+
+    # === OpenTopography API Key (Recommended for DEM downloads) ===
+    st.markdown("### 🔑 OpenTopography API Key (Optional but Recommended)")
+    st.caption("Get a free API key from: https://portal.opentopography.org/login")
+
+    if "opentopo_api_key" not in st.session_state:
+        st.session_state.opentopo_api_key = ""
+
+    api_key_input = st.text_input(
+        "OpenTopography API Key",
+        value=st.session_state.opentopo_api_key,
+        type="password",
+        placeholder="Enter your API key here (optional)",
+        help="Using an API key gives you higher download limits and access to more datasets."
+    )
+
+    if api_key_input != st.session_state.opentopo_api_key:
+        st.session_state.opentopo_api_key = api_key_input
 
     # === Upload your own DEM (Strongly Recommended) ===
     st.markdown("### 📤 Upload your own DEM")
