@@ -36,19 +36,23 @@ warnings.filterwarnings('ignore')
 
 
 def gdf_to_shapefile_zip(gdf: gpd.GeoDataFrame, layer_name: str = "layer") -> bytes:
-    """Convert a GeoDataFrame to a zipped Shapefile (in memory)."""
+    """
+    Convert a GeoDataFrame to a zipped Shapefile (in memory).
+    More robust implementation to avoid /vsimem errors on some systems.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
-        shp_path = os.path.join(tmpdir, f"{layer_name}.shp")
-        gdf.to_file(shp_path, driver="ESRI Shapefile")
-        
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
-                file_path = os.path.join(tmpdir, f"{layer_name}{ext}")
-                if os.path.exists(file_path):
-                    zipf.write(file_path, arcname=f"{layer_name}{ext}")
-        zip_buffer.seek(0)
-        return zip_buffer.getvalue()
+        base_path = os.path.join(tmpdir, layer_name)
+        gdf.to_file(base_path + ".shp", driver="ESRI Shapefile")
+
+        zip_path = os.path.join(tmpdir, layer_name + ".zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
+                fpath = base_path + ext
+                if os.path.exists(fpath):
+                    zf.write(fpath, arcname=layer_name + ext)
+
+        with open(zip_path, 'rb') as f:
+            return f.read()
 
 # Raster / Hydrology
 try:
