@@ -1,5 +1,5 @@
 # ============================================
-# Land Use Map Maker - Requirements (v0.5.0)
+# Land Use Map Maker - Requirements (v0.5.1)
 # ============================================
 
 # Core Web App
@@ -13,8 +13,9 @@ geopandas>=0.14.0
 folium>=0.16.0
 shapely>=2.0.0
 pandas>=2.0.0
-numpy>=1.26.0,<2.0
+numpy>=1.26.0,<2.0   # Required for pysheds compatibility (numpy.in1d removed in NumPy 2.x)
 matplotlib>=3.8.0
+plotly>=5.20.0
 pyproj>=3.6.0
 
 # Raster & Hydrology
@@ -27,3 +28,4 @@ bmi-topography>=0.9.0     # Recommended for DEM download (more reliable)
 
 # Optional but Recommended
 branca>=0.7.0
+plotly>=5.18.0          # For 3D DEM visualization

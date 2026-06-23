@@ -404,6 +404,82 @@ def delineate_watershed(
         st.error(f"Watershed delineation failed: {str(e)}")
         return None, None
 
+
+def extract_stream_network(dem_path: str, accumulation_threshold: int = 1000) -> Optional[gpd.GeoDataFrame]:
+    """
+    Extract stream network as vector lines using pysheds.
+    Returns a GeoDataFrame of stream segments.
+    """
+    if not HAS_PYSHEDS:
+        st.error("pysheds is not installed.")
+        return None
+
+    try:
+        grid = Grid.from_raster(dem_path)
+        dem = grid.read_raster(dem_path)
+
+        # Preprocess
+        dem = grid.fill_pits(dem)
+        dem = grid.fill_depressions(dem)
+        dem = grid.resolve_flats(dem)
+
+        fdir = grid.flowdir(dem)
+        acc = grid.accumulation(fdir)
+
+        # Extract river network
+        streams = grid.extract_river_network(fdir, acc > accumulation_threshold)
+
+        if not streams or 'features' not in streams:
+            st.warning("No streams extracted. Try lowering the accumulation threshold.")
+            return None
+
+        # Convert to GeoDataFrame
+        geometries = []
+        for feature in streams['features']:
+            geom = shape(feature['geometry'])
+            geometries.append(geom)
+
+        stream_gdf = gpd.GeoDataFrame(geometry=geometries, crs="EPSG:4326")
+        stream_gdf['length_m'] = stream_gdf.length * 111139  # rough conversion to meters
+
+        return stream_gdf
+
+    except Exception as e:
+        st.error(f"Stream network extraction failed: {e}")
+        return None
+
+
+def compute_strahler_order(dem_path: str, accumulation_threshold: int = 1000) -> Optional[dict]:
+    """
+    Compute Strahler stream order using pysheds.
+    Returns dict with raster and some stats.
+    """
+    if not HAS_PYSHEDS:
+        return None
+
+    try:
+        grid = Grid.from_raster(dem_path)
+        dem = grid.read_raster(dem_path)
+
+        dem = grid.fill_pits(dem)
+        dem = grid.fill_depressions(dem)
+        dem = grid.resolve_flats(dem)
+
+        fdir = grid.flowdir(dem)
+        acc = grid.accumulation(fdir)
+
+        # Strahler order
+        strahler = grid.stream_order(fdir, acc > accumulation_threshold)
+
+        return {
+            "strahler_raster": strahler,
+            "grid": grid,
+            "threshold": accumulation_threshold
+        }
+    except Exception as e:
+        st.error(f"Strahler order calculation failed: {e}")
+        return None
+
 # ==================== FOLIUM MAP (ENHANCED) ====================
 
 def create_folium_map(
@@ -758,23 +834,29 @@ with st.sidebar:
         if st.session_state.get("show_3d_dem"):
             try:
                 import plotly.graph_objects as go
-                with rasterio.open(st.session_state.dem_path) as src:
-                    dem_array = src.read(1)
-                    # Downsample for performance if too large
-                    if dem_array.shape[0] > 500 or dem_array.shape[1] > 500:
-                        dem_array = dem_array[::max(1, dem_array.shape[0]//400), ::max(1, dem_array.shape[1]//400)]
-                    
-                    fig = go.Figure(data=[go.Surface(z=dem_array, colorscale='Earth')])
-                    fig.update_layout(
-                        title="3D DEM Visualization",
-                        autosize=True,
-                        width=700,
-                        height=600,
-                        margin=dict(l=65, r=50, b=65, t=90)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Failed to render 3D DEM: {e}")
+            except ImportError:
+                st.error("`plotly` is not installed. Please run: `pip install plotly` to use 3D DEM visualization.")
+                st.session_state.show_3d_dem = False
+            else:
+                try:
+                    with rasterio.open(st.session_state.dem_path) as src:
+                        dem_array = src.read(1)
+                        # Downsample for performance
+                        if dem_array.shape[0] > 500 or dem_array.shape[1] > 500:
+                            step = max(1, max(dem_array.shape) // 400)
+                            dem_array = dem_array[::step, ::step]
+                        
+                        fig = go.Figure(data=[go.Surface(z=dem_array, colorscale='Earth')])
+                        fig.update_layout(
+                            title="3D DEM Visualization",
+                            autosize=True,
+                            width=700,
+                            height=600,
+                            margin=dict(l=65, r=50, b=65, t=90)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Failed to render 3D DEM: {e}")
         
         # Step 2: Select Outlet
         st.markdown("**Select Outlet / Pour Point**")
@@ -855,6 +937,68 @@ with st.sidebar:
             mime=ws_mime,
             key="download_watershed"
         )
+
+    # ==================== STREAM NETWORK & STRAHLER ====================
+    if st.session_state.dem_path and os.path.exists(st.session_state.dem_path):
+        st.markdown("---")
+        st.subheader("🌊 Stream Network & Strahler Order")
+
+        acc_threshold = st.slider(
+            "Accumulation Threshold (cells)", 
+            min_value=100, max_value=10000, value=1000, step=100,
+            help="Higher = fewer but larger streams. Lower = more detailed stream network."
+        )
+
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            if st.button("Extract Stream Network"):
+                with st.spinner("Extracting streams..."):
+                    stream_gdf = extract_stream_network(st.session_state.dem_path, acc_threshold)
+                    if stream_gdf is not None and not stream_gdf.empty:
+                        st.session_state.stream_network = stream_gdf
+                        st.success(f"Extracted {len(stream_gdf)} stream segments!")
+                    else:
+                        st.warning("No streams extracted.")
+
+        with col_s2:
+            if st.button("Compute Strahler Order"):
+                with st.spinner("Calculating Strahler order..."):
+                    strahler_result = compute_strahler_order(st.session_state.dem_path, acc_threshold)
+                    if strahler_result:
+                        st.session_state.strahler_result = strahler_result
+                        st.success("Strahler order computed!")
+
+        # Show stream network if available
+        if st.session_state.get('stream_network') is not None:
+            stream_gdf = st.session_state.stream_network
+            st.write(f"**Stream Network:** {len(stream_gdf)} segments")
+
+            # Download with format choice
+            stream_format = st.selectbox(
+                "Stream Network Format",
+                ["GeoJSON", "Shapefile (.zip)"],
+                key="stream_fmt"
+            )
+
+            if stream_format == "GeoJSON":
+                stream_data = stream_gdf.to_json()
+                stream_fname = "stream_network.geojson"
+                stream_mime = "application/json"
+            else:
+                stream_data = gdf_to_shapefile_zip(stream_gdf, layer_name="stream_network")
+                stream_fname = "stream_network.zip"
+                stream_mime = "application/zip"
+
+            st.download_button(
+                label=f"⬇️ Download Stream Network ({stream_format})",
+                data=stream_data,
+                file_name=stream_fname,
+                mime=stream_mime
+            )
+
+        # Show Strahler info
+        if st.session_state.get('strahler_result'):
+            st.info("Strahler order raster computed. You can use it for further analysis or visualization.")
 
     # Clear watershed data
     if st.button("🗑️ Clear Watershed Data"):
