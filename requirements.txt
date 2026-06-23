@@ -13,7 +13,7 @@ geopandas>=0.14.0
 folium>=0.16.0
 shapely>=2.0.0
 pandas>=2.0.0
-numpy>=1.26.0
+numpy>=1.26.0,<2.0
 matplotlib>=3.8.0
 pyproj>=3.6.0
 
